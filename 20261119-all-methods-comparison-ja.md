@@ -44,6 +44,7 @@
 | F ローカル Gemma 4 12B QAT<br>v2 / reasoning_effort=none | 0.9885 | 0.9516 | 0.9697 | 0.9516 (0.9268–0.9613) | 0.0434 |
 | G ローカル qwen3-swallow-8B<br>v2 / thinking-off | 0.9118 | 0.6901 | 0.7856 | 0.6901 (0.6551–0.7270) | 0.3049 |
 | H BERT（ローカル smoke）<br>`phi-deidentification-bert` / expanded 8-label<br>公式モデルの重みなし | 0.3814 | 0.6840 | 0.4897 | 0.6840 (0.6602–0.7108) | 0.3110 |
+| I MedPHINER-Llama-3.1-Swallow-8B<br>native `<phi_*>` prompt / expanded 8-label<br>200 docs / 54 incomplete | 0.6042 | 0.7244 | 0.6589 | 0.7244 (0.7134–0.7726) | 0.2706 |
 
 ### 2.2 over-mask / IoU / 予測数 / 未注釈 / all-label precision
 
@@ -58,11 +59,13 @@
 | F ローカル Gemma 4 12B QAT<br>v2 / reasoning_effort=none | 0.0102 | 0.9640 | 1,572 | 0 | 1,572 | 0.9885 |
 | G ローカル qwen3-swallow-8B<br>v2 / thinking-off | 0.0850 | 0.7276 | 1,236 | 0 | 1,236 | 0.9118 |
 | H BERT（ローカル smoke）<br>`phi-deidentification-bert` / expanded 8-label<br>公式モデルの重みなし | 0.0882 | 0.5170 | 2,929 | 530 | 3,459 | 0.3229 |
+| I MedPHINER-Llama-3.1-Swallow-8B<br>native `<phi_*>` prompt / expanded 8-label<br>200 docs / 54 incomplete | 0.3639 | 0.5221 | 1,958 | 122 | 2,080 | 0.5687 |
 
 - `over-mask` は「どの gold とも重ならない予測 / 全予測」。A/C の 615 個の未注釈予測が値を押し上げる。B の 0.0039 は「B が 8 ラベルしか出さない」ためであり、**B のマスクがより安全という意味ではない**。
 - `char IoU` も未注釈予測を予測側の和集合に含む。A/C の低値には DATE/ORG など未注釈ラベルの予測（**正しさは未検証**）が含まれる。F/E の 0.96–0.97 は主に 8 ラベルの境界品質による。**IoU は E 0.9727 が最高、次いで F 0.9640、B 0.9424。**
 - `all-label P` は未注釈予測を FP として数える。A 0.5601、C 0.7096 は「8 ラベルの適合率」ではない。8 ラベルの適合率は 2.1 を参照。
 - **H の注記**: H は公式 `sociocom/phi-deidentification-bert` の重みではなく、公開 `train.py` と jmtt1-5k の 797 篇で学習した smoke checkpoint である。`expanded` は `phi_location → ADDRESS/POSTAL_CODE`、`phi_id → EMAIL/ACCOUNT/MYNUMBER` の duplicate を含むため、**A–G と同じ 8 ラベル比較ではない**。H の 2.1/2.2 は参考行であり、順位付けには使わない。詳細は第 12 節。
+- **I の注記**: I は `MedPHINER-Llama-3.1-Swallow-8B` を **native `<phi_*>` prompt** で評価したもので、Gemma 4 の JSON prompt とは異なる（MedPHINER は JSON prompt を守れないため、同一 prompt では 0 件になる）。sumi 200 篇中 **54 篇で本文が不完全**（モデルが途中で出力を止める）ため、recall は下限である。`phi_location → ADDRESS/POSTAL_CODE`、`phi_id → ACCOUNT/MYNUMBER`、`phi_age → DOB` の duplicate を含む。I は A–G の順位に混ぜない。詳細は第 13 節。
 
 ## 3. ラベル別成績（8 ラベル）
 
@@ -509,4 +512,80 @@ duplicate した best-effort の結果。duplicate により FP が大きく出�
 - **公式 BERT の 200 文書成績として引用してはいけない**。
 - 公式 checkpoint が提供されたら、同じ `inference.py` / `scripts/eval_phi_bert_sumi.py` で
   200 文書を再評価する。そのとき初めて A/B/C/E/F/G と同じ表に置ける。
+
+## 13. 追加: MedPHINER-Llama-3.1-Swallow-8B（native `<phi_*>` prompt）
+
+> **この節は A–G のランキングに追加するものではない。**
+> MedPHINER は公式の `sociocom/MedPHINER-Llama-3.1-Swallow-8B` を使ったが、
+> Gemma 4 の JSON prompt を守れないため、**native `<phi_*>` prompt** で評価した。
+> 両データセットで同じ prompt / 同じ設定を使っている。
+
+### 13.1 設定
+
+| 項目 | 内容 |
+|---|---|
+| モデル | `medphiner-llama-3.1-swallow-8b-instruct-v0.5` |
+| prompt | `medphiner-native-v1`（`<phi_*>` タグ、7 ラベル） |
+| 生成 | `temperature=0.0`, `max_tokens=8192`, 1 call/doc, `max_chars=4000` |
+| 評価 | 200 文書、4 workers |
+| 入力 | `data/public/sumi-ja-test.jsonl` |
+| 出力 | `out/medphiner-sumi-full/sumi_spans.jsonl` |
+| レポート | `reports/20261119-medphiner-sumi.json` |
+
+- 200/200 完成、0 失敗。
+- `plain_match=True` は 146/200。**54 篇はモデルが本文を途中で止めたため incomplete**。
+  そのため recall は**下限**である。
+- `phi_email` は EMAIL に、`phi_id` は ACCOUNT/MYNUMBER に、`phi_location` は
+  ADDRESS/POSTAL_CODE に、`phi_age` は DOB に写像した。`phi_job` は破棄。
+
+### 13.2 全体結果
+
+| 見方 | 対象ラベル | 予測数 | P | R | F1 | critical R | over-mask | char IoU | support |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| strict | PERSON / PHONE / ADDRESS / EMAIL | 1,234 | **0.9165** | **0.8119** | **0.8611** | 0.8119 | 0.0616 | 0.7211 | 1,393 |
+| expanded | 8 ラベル（duplicate） | 2,080 | 0.6042 | 0.7244 | 0.6589 | 0.7244 | 0.3639 | 0.5221 | 1,633 |
+| agnostic | ラベル無視（any PHI） | 2,080 | 0.5793 | **0.7379** | 0.6491 | 0.7379 | 0.3639 | 0.5221 | 1,633 |
+
+### 13.3 ラベル別結果（expanded）
+
+| label | support | pred | P | R | F1 |
+|---:|---:|---:|---:|---:|---:|
+| PERSON | 811 | 775 | **0.932** | **0.890** | **0.910** |
+| PHONE | 284 | 247 | **0.931** | 0.810 | 0.866 |
+| EMAIL | 158 | 128 | **1.000** | 0.810 | 0.895 |
+| ADDRESS | 140 | 84 | 0.607 | 0.364 | 0.455 |
+| POSTAL_CODE | 94 | 84 | 0.059 | 0.053 | 0.056 |
+| ACCOUNT | 53 | 319 | 0.110 | 0.660 | 0.188 |
+| MYNUMBER | 11 | 319 | 0.035 | 1.000 | 0.067 |
+| DOB | 82 | 2 | 0.500 | 0.012 | 0.024 |
+| ORGANIZATION | 0 | 122 | — | — | — |
+
+- PERSON / PHONE / EMAIL は強い。特に EMAIL P 1.000。
+- **ADDRESS / POSTAL_CODE は弱い**。`phi_location` が住所全体を拾えず、
+  duplicate で POSTAL の FP も増える。
+- **ACCOUNT / MYNUMBER は precision が低い**。`phi_id` が口座・会員番号・
+  受付番号などを一括してしまう。
+- **DOB はほぼ 0**。`phi_age` は年齢に寄り、生年月日を拾えない。
+- ORGANIZATION 122 は sumi の 8 ラベル外なので採点外。
+
+### 13.4 講評
+
+- strict 4 ラベル F1 **0.8611** は高いが、PERSON/PHONE/ADDRESS/EMAAL の 4 ラベルだけ。
+- expanded 8 ラベル F1 **0.6589**。A regex 0.6640 と同程度だが、
+  `over-mask 0.3639`、`char IoU 0.5221` で境界・過剰検出は悪い。
+- **54/200 篇が incomplete** なので、本来の recall はこれより高い可能性がある。
+  一方、incomplete を補うには chunk 分割が必要で、それは「1 call/doc」条件を崩す。
+- MedPHINER は **native prompt でないと動かない**。Gemma 4 の JSON prompt では
+  0 件になるため、**Gemma 4 と同じ prompt での比較は不能**である。
+- I は A–G のランキングに混ぜない。詳細は `20261119-jmtt1-5k-regex-cpu-result-ja.md` 第 13 節。
+
+### 13.5 関連ファイル
+
+- `reports/20261119-medphiner-sumi.json`
+- `out/medphiner-sumi-full/sumi_spans.jsonl`
+- `out/medphiner_sumi_full.log`
+- `out/medphiner_eval_sumi.log`
+- `scripts/run_medphiner.py`
+- `scripts/eval_phi_bert_sumi.py`
+
 

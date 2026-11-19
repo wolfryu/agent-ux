@@ -136,13 +136,17 @@ P/R/F1 の採点対象外（`annotated_labels_only`）である。
 | A: regex | 5,622 | 4,992 | **0.4621** | 0.2253 | 0.3030 | 0.2251 | 0.7749 | 0.4232 | 0.2428 | 630 |
 | B: CPU モデル単体 | 3,728 | 3,275 | 0.4275 | 0.1367 | 0.2072 | 0.1368 | 0.8632 | 0.4195 | 0.1897 | 453 |
 | C: regex+CPU | 8,690 | 7,673 | 0.4443 | **0.3330** | **0.3807** | **0.3328** | **0.6672** | 0.4328 | **0.2710** | 1,017 |
+| D: Gemma 4 12B（既存・第 11 節）<br>v2 / `reasoning_effort=none` | 8,604 | 8,604 | **0.9188** | **0.7721** | **0.8391** | **0.7721** | **0.2279** | **0.0732** | **0.7403** | 0 |
 | H: BERT（**sumi 200 で学習 → jmtt 798 でテスト**）<br>`phi-deidentification-bert` smoke / expanded 8-label<br>公式モデルの重みなし、リークなし | 28,278 | 27,720 | 0.0839 | 0.2272 | 0.1226 | 0.2273 | 0.7727 | 0.5320 | 0.1958 | 558 |
+| I: MedPHINER-Llama-3.1-Swallow-8B<br>native `<phi_*>` prompt / expanded 8-label<br>798 docs / 617 incomplete | 6,566 | 6,566 | 0.4953 | 0.3176 | 0.3871 | 0.3176 | 0.6824 | 0.1873 | 0.3616 | 0 |
 
 - **F1 は C (0.3807) > A (0.3030) > B (0.2072)**。
 - C は A より recall を +0.108 改善するが、precision は −0.018 低下し、over-mask は +0.010 増える。
 - B は単体では最も弱い。特に ORGANIZATION が 0 件、EMAIL/DOB の誤予測が多い。
 - 3 構成とも critical recall gate（0.995）は **FAIL**。
+- **D（Gemma 4）を同じ表に並べると、F1 は D 0.8391 > C 0.3807 > A 0.3030 > B 0.2072**。D は第 11 節の既存結果をそのまま表に追加したもので、A/B/C の数値は変更していない。D も critical recall 0.7721 で gate 0.995 は FAIL。
 - **H の注記**: H は `sumi-ja-test` 200 篇だけで学習し、jmtt1-5k 798 篇でテストした **リークなしの cross-domain smoke**。jmtt のデータは一切学習に使っていない。ただし公式 BERT の重みではなく、`ORGANIZATION` の学習例が sumi にないため ORG recall は 0.005 とほぼ全滅。H は「sumi で学習した BERT は jmtt にそのまま移らない」ことの参考行であり、A/B/C/Gemma の順位に混ぜない。詳細は第 12 節。
+- **I の注記**: I は公式 MedPHINER を **native `<phi_*>` prompt** で評価した。Gemma 4 の JSON prompt は MedPHINER では通らないため、両データセットで同じ native prompt を使っている。798 篇中 **617 篇で本文が不完全**（モデルが途中で出力を止める）ため、recall は下限。`phi_hospital → ORGANIZATION`、`phi_location → ADDRESS/POSTAL_CODE`、`phi_id → ACCOUNT/URL`、`phi_age → DOB/AGE` の duplicate を含む。I は A–G/H の順位に混ぜない。詳細は第 13 節。
 
 ### 全ラベル表示（未注釈ラベルを含む参考値）
 
@@ -530,5 +534,88 @@ PYTHONPATH=src .venv/Scripts/python.exe -m piimask eval \
 - `external/phi-deidentification-bert/configs/sumi_train_200.yaml`
 - `external/phi-deidentification-bert/out_sumi_smoke/`
 - `docs/phi-deidentification-bert-integration.md`
+
+
+---
+
+## 13. 追加: MedPHINER-Llama-3.1-Swallow-8B（native `<phi_*>` prompt、jmtt 798）
+
+> **この節は A/B/C/Gemma/BERT(H) の順位に追加するものではない。**
+> `sociocom/MedPHINER-Llama-3.1-Swallow-8B-Instruct-v0.5` を **native `<phi_*>` prompt** で
+> 評価した。Gemma 4 の JSON prompt は MedPHINER では通らないため、
+> **sumi 200 と jmtt 798 で同じ native prompt / 同じ設定**を使っている。
+> jmtt のデータは学習に一切使っていない（ゼロショット）。
+
+### 13.1 設定
+
+| 項目 | 内容 |
+|---|---|
+| モデル | `medphiner-llama-3.1-swallow-8b-instruct-v0.5` |
+| prompt | `medphiner-native-v1`（`<phi_*>` タグ、7 ラベル） |
+| 生成 | `temperature=0.0`, `max_tokens=8192`, 1 call/doc, `max_chars=4000` |
+| 評価 | 798 文書、4 workers |
+| 入力 | `data/private/jmtt1-5k-gold/jmtt1-5k-gold.jsonl` |
+| 出力 | `out/medphiner-jmtt-full/jmtt_spans.jsonl` |
+| レポート | `reports/20261119-medphiner-jmtt.json` |
+
+- 798/798 完成、0 失敗、raw span **5,109**。
+- `plain_match=True` は **181/798**。**617 篇はモデルが本文を途中で止めたため incomplete**。
+  そのため recall は**下限**である。
+- `phi_hospital → ORGANIZATION`、`phi_location → ADDRESS/POSTAL_CODE`、
+  `phi_id → ACCOUNT/URL`、`phi_age → DOB/AGE` に写像。`phi_job` は破棄。
+
+### 13.2 全体結果
+
+| 見方 | 対象ラベル | 予測数 | P | R | F1 | critical R | over-mask | char IoU | support |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| strict | PERSON / ORGANIZATION / ADDRESS / DOB | 4,938 | **0.6574** | **0.3193** | **0.4298** | 0.3193 | 0.1480 | 0.3651 | 10,166 |
+| expanded | 8 ラベル（duplicate） | 6,566 | 0.4953 | 0.3176 | 0.3871 | 0.3176 | 0.1873 | 0.3616 | 10,238 |
+| agnostic | ラベル無視（any PHI） | 6,566 | 0.5559 | **0.3565** | 0.4344 | 0.3565 | 0.1873 | 0.3616 | 10,238 |
+
+### 13.3 ラベル別結果（expanded）
+
+| label | support | pred | P | R | F1 |
+|---|---:|---:|---:|---:|---:|
+| ORGANIZATION | 7,669 | 2,343 | **0.871** | 0.266 | 0.408 |
+| PERSON | 1,555 | 1,001 | 0.703 | 0.453 | 0.551 |
+| ADDRESS | 923 | 1,415 | 0.353 | 0.542 | 0.428 |
+| POSTAL_CODE | 16 | 1,415 | 0.002 | 0.188 | 0.004 |
+| ACCOUNT | 32 | 17 | 0.118 | 0.062 | 0.082 |
+| URL | 21 | 17 | 0.000 | 0.000 | 0.000 |
+| DOB | 19 | 179 | 0.006 | 0.053 | 0.010 |
+| AGE | 3 | 179 | 0.006 | 0.333 | 0.011 |
+
+- **ORGANIZATION は precision 0.871 と高いが recall 0.266**。
+  MedPHINER は医療機関名をよく拾うが、企業・大学・団体・ページタイトルなどは
+  大量に落としている（7,669 件中 5,628 FN）。
+- **PERSON は P 0.703 / R 0.453 / F1 0.551**。sumi より弱く、jmtt の
+  敬称なし・英語名・組織内人名を取り切れていない。
+- **ADDRESS は P 0.353 / R 0.542**。`phi_location` が住所の一部だけを拾う。
+- **POSTAL_CODE / DOB / AGE / ACCOUNT / URL はほぼ 0**。
+  `phi_location` / `phi_age` / `phi_id` の粒度が粗く、duplicate でも埋まらない。
+- `over-mask 0.1873`、`char IoU 0.3616`。5,109 raw span のうち少なくないものが
+  gold と重ならない。
+
+### 13.4 講評
+
+- **native prompt では MedPHINER は jmtt に弱い**。
+  expanded F1 **0.3871**、strict 4 ラベル F1 **0.4298**。
+- ただし **617/798 篇が incomplete** なので、これは**下限**である。
+  chunk 分割すれば recall は上がる可能性があるが、それは「1 call/doc」条件を崩す。
+- sumi 200 では expanded F1 0.6589 / strict 0.8611 だった。
+  同じ prompt・同じ設定でも、jmtt の組織名中心の Wikipedia 記事には generalise しない。
+- ORGANIZATION の precision 0.871 は良いが、recall 0.266 では実用にならない。
+- A/B/C/Gemma の順位に混ぜない。**native prompt は Gemma 4 の JSON prompt と異なる**ため、
+  prompt 条件も同一ではない。同じ prompt での比較は、両モデルが守れる共通 prompt を
+  別途設計して再実行する必要がある。
+
+### 13.5 関連ファイル
+
+- `reports/20261119-medphiner-jmtt.json`
+- `out/medphiner-jmtt-full/jmtt_spans.jsonl`
+- `out/medphiner_jmtt_full.log`
+- `out/medphiner_eval_jmtt.log`
+- `scripts/run_medphiner.py`
+- `scripts/eval_phi_bert_jmtt.py`
 
 
